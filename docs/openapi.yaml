@@ -1,0 +1,600 @@
+openapi: 3.0.3
+info:
+  title: 다음역 F-00 F-04 프론트 연동 API
+  version: 1.0.0
+  description: 기준 커밋 fa7bde0b3d99724c0ba999b67e404406c71cd237. 요청/응답 래퍼 없음. 시간은 ISO 8601 offset 포함, 응답 UTC. 기본 푸시는
+    비활성화. 배포 URL/활성화 여부는 서버 담당자와 확인하세요. 커스텀 예외 외의 서버/CORS 오류는 JSON을 보장하지 않습니다.
+servers:
+- url: http://localhost:8080
+  description: 로컬 개발. 배포 서버 주소 확인 후 변경.
+tags:
+- name: 공통
+- name: F-00
+  description: 푸시 구독 및 테스트
+- name: F-04
+  description: 하차 알림 예약 및 발송 상태
+externalDocs:
+  url: https://github.com/next-station-team/next-station-backend/pull/5
+  description: 기준 구현 PR
+paths:
+  /api/health:
+    get:
+      operationId: getHealth
+      tags:
+      - 공통
+      summary: 서버 상태 확인
+      description: UP은 푸시 활성화/기기 수신을 보증하지 않습니다.
+      responses:
+        '200':
+          description: 정상
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: UP
+        default:
+          description: 미정의 서버/프록시 오류. 공통 ErrorResponse 또는 JSON 형식을 보장하지 않음.
+  /api/push/vapid-public-key:
+    get:
+      operationId: getVapidPublicKey
+      tags:
+      - F-00
+      summary: VAPID 공개키 조회
+      description: 개인키는 프론트에 전달하지 않습니다.
+      responses:
+        '200':
+          description: 공개키
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VapidPublicKeyResponse'
+        '503':
+          description: 'PUSH_DISABLED: 서버 푸시 비활성화'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: 미정의 서버/프록시 오류. 공통 ErrorResponse 또는 JSON 형식을 보장하지 않음.
+  /api/push/subscriptions:
+    post:
+      operationId: upsertPushSubscription
+      tags:
+      - F-00
+      summary: 푸시 구독 등록 및 갱신
+      description: deviceId는 본문에 전달합니다. 같은 기기는 구독을 갱신하고 createdAt을 유지합니다. 구독 등록 성공은 발송 활성화를 뜻하지 않습니다.
+      responses:
+        '200':
+          description: 등록/갱신 모두 200
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionResponse'
+              example:
+                deviceId: ad216e40-432b-4e3e-bb9a-1d9f17291720
+                active: true
+                createdAt: '2026-11-12T00:00:00Z'
+                updatedAt: '2026-11-12T00:00:00Z'
+        '400':
+          description: INVALID_REQUEST / INVALID_SUBSCRIPTION_KEYS / INVALID_PUSH_ENDPOINT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: SUBSCRIPTION_ALREADY_REGISTERED / RESOURCE_CONFLICT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: 미정의 서버/프록시 오류. 공통 ErrorResponse 또는 JSON 형식을 보장하지 않음.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionRequest'
+  /api/push/test:
+    post:
+      operationId: sendTestPush
+      tags:
+      - F-00
+      summary: 테스트 푸시 발송
+      description: 본문 없음. 기기별 실제 발송 시도 간 30초 제한(실패 시도 포함). 서버가 제공자에게 접수한 결과이며 단말 표시 완료가 아닙니다.
+      responses:
+        '202':
+          description: 제공자 접수 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestPushResponse'
+              example:
+                status: ACCEPTED
+        '400':
+          description: INVALID_REQUEST
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: DEVICE_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: RESOURCE_CONFLICT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: SUBSCRIPTION_EXPIRED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: TEST_PUSH_RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: PUSH_HTTP_* / PUSH_NETWORK_ERROR / PUSH_INTERRUPTED / PUSH_ENCODING_ERROR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: PUSH_DISABLED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: 미정의 서버/프록시 오류. 공통 ErrorResponse 또는 JSON 형식을 보장하지 않음.
+      parameters:
+      - $ref: '#/components/parameters/DeviceId'
+  /api/sessions/{sessionId}/alarms:
+    parameters:
+    - $ref: '#/components/parameters/SessionId'
+    put:
+      operationId: replaceSessionAlarms
+      tags:
+      - F-04
+      summary: 하차 알림 예약 및 보정
+      description: 기본 FINISH=arrivalAt-5분-1분, PREPARE=arrivalAt-1분-1분. 미발송 예약은 트랜잭션으로 삭제 후 새 ID로 생성합니다. 이미 SENT인
+        단계는 그대로 보존합니다. 같은 기기/세션의 요청을 직렬화하세요. 서버 푸시가 비활성화되어도 유효한 구독의 예약은 PENDING으로 저장할 수 있습니다.
+      responses:
+        '200':
+          description: 두 단계 예약 배열. 동일 시각 항목의 배열 순서에 의존하지 마세요.
+          content:
+            application/json:
+              schema: &id001
+                type: array
+                items:
+                  $ref: '#/components/schemas/AlarmResponse'
+              example: &id002
+              - alarmId: a9a7bf68-f8b8-4277-a71f-85886de4b095
+                sessionId: b7458e9d-5dc7-4caa-9379-45e6e6ccf5b6
+                type: FINISH
+                scheduledAt: '2026-11-12T00:24:00Z'
+                expiresAt: '2026-11-12T00:28:00Z'
+                arrivalAt: '2026-11-12T00:30:00Z'
+                minutesBeforeArrival: 5
+                status: PENDING
+                attemptCount: 0
+                sentAt: null
+                lastErrorCode: null
+              - alarmId: 971e6967-8da5-4408-824b-d72bda075a57
+                sessionId: b7458e9d-5dc7-4caa-9379-45e6e6ccf5b6
+                type: PREPARE
+                scheduledAt: '2026-11-12T00:28:00Z'
+                expiresAt: '2026-11-12T00:30:00Z'
+                arrivalAt: '2026-11-12T00:30:00Z'
+                minutesBeforeArrival: 1
+                status: PENDING
+                attemptCount: 0
+                sentAt: null
+                lastErrorCode: null
+        '400':
+          description: INVALID_REQUEST / INVALID_REMINDER_MINUTES / INVALID_ARRIVAL_TIME
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: DEVICE_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: RESOURCE_CONFLICT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: SUBSCRIPTION_EXPIRED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: 미정의 서버/프록시 오류. 공통 ErrorResponse 또는 JSON 형식을 보장하지 않음.
+      parameters:
+      - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleRequest'
+            example:
+              arrivalAt: '2026-11-12T09:30:00+09:00'
+              reminderMinutes: 5
+    get:
+      operationId: getSessionAlarms
+      tags:
+      - F-04
+      summary: 예약 및 발송 상태 조회
+      description: 등록 기기의 해당 세션 예약이 없으면 []입니다. 구독 비활성 기기도 조회할 수 있습니다. 미등록 기기는 404입니다. 응답은 scheduledAt 오름차순이며 동률
+        순서는 보장하지 않습니다.
+      responses:
+        '200':
+          description: 예약 배열 또는 빈 배열
+          content:
+            application/json:
+              schema: *id001
+              example: *id002
+        '400':
+          description: INVALID_REQUEST
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: DEVICE_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: 미정의 서버/프록시 오류. 공통 ErrorResponse 또는 JSON 형식을 보장하지 않음.
+      parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    delete:
+      operationId: cancelSessionAlarms
+      tags:
+      - F-04
+      summary: 세션의 예약과 발송 기록 삭제
+      description: 기기/세션 범위로 삭제합니다. 미등록 기기 또는 예약 없음도 204입니다. 구독 비활성 기기도 취소할 수 있습니다. 반복 취소는 204이며, 이미 제공자가 접수한 푸시는
+        회수되지 않습니다.
+      responses:
+        '204':
+          description: 성공. 응답 본문 없음. response.json()을 호출하지 마세요.
+        '400':
+          description: INVALID_REQUEST
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: RESOURCE_CONFLICT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        default:
+          description: 미정의 서버/프록시 오류. 공통 ErrorResponse 또는 JSON 형식을 보장하지 않음.
+      parameters:
+      - $ref: '#/components/parameters/DeviceId'
+components:
+  parameters:
+    DeviceId:
+      name: X-Device-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        description: ''
+        format: uuid
+        example: ad216e40-432b-4e3e-bb9a-1d9f17291720
+      description: 최초 생성 후 유지하는 기기 UUID. 별도 로그인/JWT 없음. 이 값 보유를 기반으로 기기 데이터에 접근하므로 공개하지 마세요.
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        description: ''
+        format: uuid
+        example: b7458e9d-5dc7-4caa-9379-45e6e6ccf5b6
+      description: 통학 시작마다 생성하는 UUID. 보정 시 유지, 새 통학에는 새 값.
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          description: ''
+          enum:
+          - UP
+    VapidPublicKeyResponse:
+      type: object
+      required:
+      - publicKey
+      properties:
+        publicKey:
+          type: string
+          description: 브라우저 applicationServerKey에 사용하는 Base64URL VAPID 공개키
+    SubscriptionKeys:
+      type: object
+      required:
+      - p256dh
+      - auth
+      properties:
+        p256dh:
+          type: string
+          description: 실제 PushSubscription.keys.p256dh. 디코딩 시 65바이트 비압축 P-256 공개키.
+          minLength: 1
+          maxLength: 128
+        auth:
+          type: string
+          description: 실제 PushSubscription.keys.auth. 디코딩 시 16바이트 Base64URL 값.
+          minLength: 1
+          maxLength: 64
+    SubscriptionRequest:
+      type: object
+      required:
+      - deviceId
+      - endpoint
+      - keys
+      properties:
+        deviceId:
+          type: string
+          description: 최초 생성 후 유지하는 기기 UUID. 이 API에서는 본문에 포함.
+          format: uuid
+          example: ad216e40-432b-4e3e-bb9a-1d9f17291720
+        endpoint:
+          type: string
+          description: 브라우저 PushSubscription endpoint. 허용된 HTTPS 제공자 URL만 등록 가능.
+          format: uri
+          minLength: 1
+          maxLength: 2048
+        keys:
+          $ref: '#/components/schemas/SubscriptionKeys'
+    SubscriptionResponse:
+      type: object
+      required:
+      - deviceId
+      - active
+      - createdAt
+      - updatedAt
+      properties:
+        deviceId:
+          type: string
+          description: ''
+          format: uuid
+        active:
+          type: boolean
+        createdAt:
+          type: string
+          description: 최초 등록 시각
+          format: date-time
+        updatedAt:
+          type: string
+          description: 최근 구독 갱신 시각
+          format: date-time
+    TestPushResponse:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          description: 단말 수신 완료가 아닌 푸시 제공자 접수 상태.
+          enum:
+          - ACCEPTED
+    ScheduleRequest:
+      type: object
+      required:
+      - arrivalAt
+      properties:
+        arrivalAt:
+          type: string
+          description: 서버 현재 시각 이후, 24시간 이내 예상 도착 시각. 오프셋 필수. 여유분을 미리 빼지 않음.
+          format: date-time
+          example: '2026-11-12T09:30:00+09:00'
+        reminderMinutes:
+          type: integer
+          nullable: true
+          enum:
+          - 3
+          - 5
+          - 7
+          - null
+          default: 5
+          description: FINISH 알림 시점. 생략 또는 null은 5. PREPARE는 항상 1분.
+    AlarmResponse:
+      type: object
+      required:
+      - alarmId
+      - sessionId
+      - type
+      - scheduledAt
+      - expiresAt
+      - arrivalAt
+      - minutesBeforeArrival
+      - status
+      - attemptCount
+      - sentAt
+      - lastErrorCode
+      properties:
+        alarmId:
+          type: string
+          description: 예약 ID. 미발송 예약을 보정하면 바뀜.
+          format: uuid
+        sessionId:
+          type: string
+          description: ''
+          format: uuid
+        type:
+          type: string
+          description: ''
+          enum:
+          - FINISH
+          - PREPARE
+        scheduledAt:
+          type: string
+          description: 1분 여유를 적용한 서버 기준 발송 예정 시각. 프론트 타이머 기준.
+          format: date-time
+        expiresAt:
+          type: string
+          description: 이 시각 이상이면 화면에서 알림을 만료 처리.
+          format: date-time
+        arrivalAt:
+          type: string
+          description: 해당 예약이 생성될 때의 예상 도착 시각. SENT 기록은 보정해도 이전 값 유지.
+          format: date-time
+        minutesBeforeArrival:
+          type: integer
+          enum:
+          - 1
+          - 3
+          - 5
+          - 7
+          description: 명목상 알림 시점. 실제 scheduledAt에는 별도 여유분 포함.
+        status:
+          type: string
+          description: ''
+          enum:
+          - PENDING
+          - SENT
+          - FAILED
+          - EXPIRED
+        attemptCount:
+          type: integer
+          minimum: 0
+          description: 실제 발송 시도 횟수
+        sentAt:
+          type: string
+          description: 제공자 접수 성공 시각. 단말 수신 시각이 아님.
+          format: date-time
+          nullable: true
+        lastErrorCode:
+          type: string
+          description: 최근 발송 오류. 재시도 대기 중 PENDING에도 존재할 수 있음.
+          nullable: true
+    ErrorResponse:
+      type: object
+      required:
+      - code
+      - message
+      - fields
+      - timestamp
+      properties:
+        code:
+          type: string
+          description: 분기 처리용 오류 코드
+        message:
+          type: string
+          description: 표시용 설명
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+          description: 필드 오류, 없으면 {}
+        timestamp:
+          type: string
+          description: 서버 오류 응답 시각
+          format: date-time
+    WebPushPayload:
+      type: object
+      required:
+      - alarmId
+      - sessionId
+      - type
+      - title
+      - body
+      - tag
+      - scheduledAt
+      - expiresAt
+      - arrivalAt
+      - minutesBeforeArrival
+      - url
+      properties:
+        alarmId:
+          type: string
+          description: TEST이면 null
+          format: uuid
+          nullable: true
+        sessionId:
+          type: string
+          description: TEST이면 null
+          format: uuid
+          nullable: true
+        type:
+          type: string
+          description: ''
+          enum:
+          - FINISH
+          - PREPARE
+          - TEST
+        title:
+          type: string
+          description: ''
+        body:
+          type: string
+          description: ''
+        tag:
+          type: string
+          description: FINISH/PREPARE는 nextstation-{sessionId}-{type}. TEST는 nextstation-test.
+        scheduledAt:
+          type: string
+          description: ''
+          format: date-time
+        expiresAt:
+          type: string
+          description: ''
+          format: date-time
+        arrivalAt:
+          type: string
+          description: TEST이면 null
+          format: date-time
+          nullable: true
+        minutesBeforeArrival:
+          type: integer
+          enum:
+          - 0
+          - 1
+          - 3
+          - 5
+          - 7
+          description: TEST는 0
+        url:
+          type: string
+          description: 현재 구현은 앱 루트 경로 /
+          example: /
+      description: HTTP 응답이 아닌 서비스 워커 push 이벤트의 JSON payload.
+      example:
+        alarmId: a9a7bf68-f8b8-4277-a71f-85886de4b095
+        sessionId: b7458e9d-5dc7-4caa-9379-45e6e6ccf5b6
+        type: FINISH
+        title: 이제 마무리할 시간이에요
+        body: 진행 중인 콘텐츠를 저장하고 마무리해 주세요.
+        tag: nextstation-b7458e9d-5dc7-4caa-9379-45e6e6ccf5b6-FINISH
+        scheduledAt: '2026-11-12T00:24:00Z'
+        expiresAt: '2026-11-12T00:28:00Z'
+        arrivalAt: '2026-11-12T00:30:00Z'
+        minutesBeforeArrival: 5
+        url: /
+x-source-commit: fa7bde0b3d99724c0ba999b67e404406c71cd237
+x-web-push-payload:
+  $ref: '#/components/schemas/WebPushPayload'

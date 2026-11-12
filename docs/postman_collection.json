@@ -1,0 +1,347 @@
+{
+  "info": {
+    "name": "다음역 F-00 F-04 프론트 연동",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "기준 커밋 fa7bde0b3d99724c0ba999b67e404406c71cd237. 실제 브라우저의 구독값이 필요합니다. 기본 baseUrl은 로컬이며 배포 확인 전 원격 주소를 가정하지 않습니다. 전체 실행에는 실제 테스트 푸시 발송과 예약 취소가 포함됩니다. 30초 이내 반복 실행은 429가 발생할 수 있습니다."
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "deviceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sessionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "endpoint",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "p256dh",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "auth",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "arrivalAt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "vapidPublicKey",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "for (const key of ['deviceId', 'sessionId']) {",
+          "  if (!pm.collectionVariables.get(key)) {",
+          "    pm.collectionVariables.set(key, pm.variables.replaceIn('{{$guid}}'));",
+          "  }",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "01 서버 상태",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/health",
+        "description": "UP은 푸시 활성화를 보장하지 않습니다."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "02 VAPID 공개키",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/push/vapid-public-key",
+        "description": "503이면 서버 PUSH_ENABLED/VAPID 설정을 확인합니다."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) pm.collectionVariables.set('vapidPublicKey', pm.response.json().publicKey);"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "03 구독 등록 또는 갱신",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/push/subscriptions",
+        "description": "PWA 브라우저에서 얻은 endpoint/p256dh/auth를 컬렉션 변수에 먼저 입력하세요. VAPID 공개키를 p256dh로 넣지 마세요. deviceId는 실제 프론트가 쓰는 값과 일치해야 합니다.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"endpoint\": \"{{endpoint}}\",\n  \"keys\": {\n    \"p256dh\": \"{{p256dh}}\",\n    \"auth\": \"{{auth}}\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "04 테스트 푸시 실제 발송",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Device-Id",
+            "value": "{{deviceId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/push/test",
+        "description": "등록한 실기기에 푸시를 보냅니다. 실제 발송 시도 간 30초 제한. 소리/배너를 직접 확인하세요."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 202', () => pm.response.to.have.status(202));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "05 예약 생성 현재부터 10분 뒤 도착",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Device-Id",
+            "value": "{{deviceId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/sessions/{{sessionId}}/alarms",
+        "description": "기본값 5분 선택 시 FINISH는 현재+4분, PREPARE는 현재+8분. sessionId는 새로운 통학 때 갱신하세요.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"arrivalAt\": \"{{arrivalAt}}\",\n  \"reminderMinutes\": 5\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('arrivalAt', new Date(Date.now() + 10 * 60_000).toISOString());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) pm.test('두 단계 예약', () => pm.expect(pm.response.json()).to.have.lengthOf(2));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "06 예약 조회",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Device-Id",
+            "value": "{{deviceId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/sessions/{{sessionId}}/alarms",
+        "description": "예약 상태와 서버 scheduledAt 확인."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "07 도착 시각 보정 현재부터 15분 뒤 도착",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Device-Id",
+            "value": "{{deviceId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/sessions/{{sessionId}}/alarms",
+        "description": "같은 sessionId. reminderMinutes=7. 미발송 예약 ID가 바뀝니다.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"arrivalAt\": \"{{arrivalAt}}\",\n  \"reminderMinutes\": 7\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('arrivalAt', new Date(Date.now() + 15 * 60_000).toISOString());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "08 예약 취소",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Device-Id",
+            "value": "{{deviceId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/sessions/{{sessionId}}/alarms",
+        "description": "응답 본문 없음. 제공자가 접수한 푸시는 회수할 수 없습니다."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 204', () => pm.response.to.have.status(204));",
+              "pm.test('본문 없음', () => pm.expect(pm.response.text()).to.eql(''));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "09 취소 결과 조회",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Device-Id",
+            "value": "{{deviceId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/sessions/{{sessionId}}/alarms",
+        "description": "등록 기기라면 [] 응답."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) pm.test('예약 없음', () => pm.expect(pm.response.json()).to.eql([]));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    }
+  ]
+}

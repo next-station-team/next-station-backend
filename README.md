@@ -5,6 +5,12 @@
 기준: `main`의 `ba19a03`, [F-00 #1](https://github.com/next-station-team/next-station-backend/issues/1),
 [F-04 #2](https://github.com/next-station-team/next-station-backend/issues/2), 기능명세서 F-00/F-04.
 
+팀원용 시작점: [프론트 API 명세](docs/f00-f04-api.md) · [서버 설치 및 운영 인수인계](docs/operations-handoff.md) · [OpenAPI](docs/openapi.yaml) · [Postman](docs/postman_collection.json).
+
+Linux EC2에서는 `scripts/deploy.py`가 VAPID 키 생성/가져오기, 비밀 환경설정, 영구 H2 경로, systemd 상시 실행과 상태 확인을 처리합니다. 실제 프론트 origin과 운영 연락처를 지정해야 하며, 기존 HTTPS Nginx의 연결 포트는 서버 담당자가 적용합니다. 설치 명령과 업데이트·롤백 절차는 운영 인수인계에 있습니다. 기본 서버는 127.0.0.1:8081에 바인딩하며 기존 서버를 강제 종료하지 않습니다.
+
+GitHub Actions는 테스트와 Linux 설치 검증 후 실행 JAR을 artifact로 보관합니다. 팀 EC2에 자동 배포하지 않으며 서버 접속 권한은 필요합니다.
+
 ## 개발 환경
 
 | 항목 | 구성 |
@@ -96,6 +102,6 @@ SENT는 푸시 제공자의 접수 상태이며 단말 표시를 보증하지 �
 
 로그인 없는 MVP에서는 무작위 deviceId가 기기 접근용 비밀값 역할을 합니다. `crypto.randomUUID()`로 생성하고 URL·공유 로그에 노출하지 마세요. 공개 서비스로 확장할 때는 별도 기기 인증과 IP별 요청 제한을 추가하세요. 구독 endpoint는 허용된 HTTPS 푸시 제공자만 받으며 HTTP redirect를 따라가지 않습니다.
 
-실제 iPhone 홈 화면 PWA, Android Chrome 수신과 1호선 탑승 지연 검증은 [실기기 확인 절차](docs/f00-f04-api.md#실기기-확인)를 통해 별도로 수행해야 합니다. 설치 안내·서비스 워커·페이지 화면 전환은 프론트 담당 범위입니다.
+실제 iPhone 홈 화면 PWA, Android Chrome 수신과 1호선 탑승 지연 검증은 [프론트 연동 완료 기준](docs/f00-f04-api.md#10-postman-사용과-연동-완료-기준)을 통해 별도로 수행해야 합니다. 설치 안내·서비스 워커·페이지 화면 전환은 프론트 담당 범위입니다.
 
 참고 구현: [webpush-java](https://github.com/web-push-libs/webpush-java), [Spring Boot 공식 문서](https://docs.spring.io/spring-boot/).
